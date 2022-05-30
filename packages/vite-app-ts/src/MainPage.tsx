@@ -5,7 +5,7 @@ import { useContractReader, useBalance, useEthersAdaptorFromProviderOrSigners, u
 import { useEthersAppContext } from 'eth-hooks/context';
 import { useDexEthPrice } from 'eth-hooks/dapps';
 import { asEthersAdaptor } from 'eth-hooks/functions';
-import React, { FC, useEffect, useState } from 'react';
+import React, { FC, useContext, useEffect, useState } from 'react';
 import { BrowserRouter, Switch } from 'react-router-dom';
 
 import { MainPageFooter, MainPageHeader, createPagesAndTabs, TContractPageList } from './components/main';
@@ -15,7 +15,14 @@ import { useAppContracts, useConnectAppContracts, useLoadAppContracts } from '~~
 import { useCreateAntNotificationHolder } from '~~/components/main/hooks/useAntNotification';
 import { useBurnerFallback } from '~~/components/main/hooks/useBurnerFallback';
 import { useScaffoldProviders as useScaffoldAppProviders } from '~~/components/main/hooks/useScaffoldAppProviders';
-import { BURNER_FALLBACK_ENABLED, MAINNET_PROVIDER } from '~~/config/app.config';
+import { BURNER_FALLBACK_ENABLED, DEBUG, MAINNET_PROVIDER } from '~~/config/app.config';
+import { FrontPage } from './components/pages/fontPage/FrontPage';
+import { Owners } from './components/pages/Owners';
+import { CreateTransaction } from './components/pages/CreateTransaction';
+import { TransactionTest } from './components/pages/Transactions';
+import { transactor } from 'eth-components/functions';
+import { EthComponentsSettingsContext } from 'eth-components/models';
+import { Streams } from './components/pages/Streams';
 
 /**
  * ⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️⛳️
@@ -71,27 +78,46 @@ export const MainPage: FC = () => {
   // -----------------------------
 
   // init contracts
-  const yourContract = useAppContracts('YourContract', ethersAppContext.chainId);
-  const yourNFT = useAppContracts('YourNFT', ethersAppContext.chainId);
+  const metaMultiSigWallet = useAppContracts('MetaMultiSigWallet', ethersAppContext.chainId);
+
   const mainnetDai = useAppContracts('DAI', NETWORKS.mainnet.chainId);
 
+  const [signaturesRequired] = useContractReader(metaMultiSigWallet, metaMultiSigWallet?.signaturesRequired);
+
   // keep track of a variable from the contract in the local React state:
-  const [purpose, update] = useContractReader(
-    yourContract,
-    yourContract?.purpose,
-    [],
-    yourContract?.filters.SetPurpose()
-  );
+  const [nonce] = useContractReader(metaMultiSigWallet, metaMultiSigWallet?.nonce);
+  // if (DEBUG) console.log('# nonce:', nonce);
 
-  // 📟 Listen for broadcast events
-  const [setPurposeEvents] = useEventListener(yourContract, 'SetPurpose', 0);
+  const poolServerUrl = 'http://localhost:49832/';
+  const accountAddress = ethersAppContext.account;
 
+  const signer = ethersAppContext.signer;
+  const settingsContext = useContext(EthComponentsSettingsContext);
+  const tx = transactor(settingsContext, signer, undefined, undefined, true);
+  // console.log('metaMultiSigWallet ', metaMultiSigWallet);
+  // console.log('signaturesRequired ', signaturesRequired);
+  // console.log('mainnetDai ', mainnetDai);
+
+  // // keep track of a variable from the contract in the local React state:
+  // const [purpose, update] = useContractReader(
+  //   yourContract,
+  //   yourContract?.purpose,
+  //   [],
+  //   yourContract?.filters.SetPurpose()
+  // );
+
+  // // 📟 Listen for broadcast events
+  const [executeTransactionEvents] = useEventListener(metaMultiSigWallet, 'ExecuteTransaction', 0);
+  const [ownerEvents] = useEventListener(metaMultiSigWallet, 'Owner', 1);
+  const [withdrawStreamEvents] = useEventListener(metaMultiSigWallet, 'Withdraw', 1);
+  // console.log('executeTransactionEvents ', executeTransactionEvents);
+  // console.log('ownerEvents ', ownerEvents);
   // -----------------------------
   // .... 🎇 End of examples
   // -----------------------------
   // 💵 This hook will get the price of ETH from 🦄 Uniswap:
   const [ethPrice] = useDexEthPrice(scaffoldAppProviders.mainnetAdaptor?.provider, scaffoldAppProviders.targetNetwork);
-
+  // console.log('ethPrice ', ethPrice);
   // 💰 this hook will get your balance
   const [yourCurrentBalance] = useBalance(ethersAppContext.account);
 
@@ -106,33 +132,76 @@ export const MainPage: FC = () => {
   // This is the list of tabs and their contents
   const pageList: TContractPageList = {
     mainPage: {
-      name: 'YourContract',
+      name: 'MultiSig',
       content: (
-        <GenericContract
-          contractName="YourContract"
-          contract={yourContract}
-          mainnetAdaptor={scaffoldAppProviders.mainnetAdaptor}
-          blockExplorer={scaffoldAppProviders.targetNetwork.blockExplorer}
+        <FrontPage
+          executeTransactionEvents={executeTransactionEvents}
+          metaMultiSigWallet={metaMultiSigWallet}
+          scaffoldAppProviders={scaffoldAppProviders}
+          price={ethPrice}
         />
       ),
     },
     pages: [
       {
-        name: 'YourNFT',
+        name: 'owners',
         content: (
-          <GenericContract
-            contractName="YourNFT"
-            contract={yourNFT}
-            mainnetAdaptor={scaffoldAppProviders.mainnetAdaptor}
-            blockExplorer={scaffoldAppProviders.targetNetwork.blockExplorer}></GenericContract>
+          <Owners
+            metaMultiSigWallet={metaMultiSigWallet}
+            scaffoldAppProviders={scaffoldAppProviders}
+            signaturesRequired={signaturesRequired}
+            ownerEvents={ownerEvents}
+          />
+        ),
+      },
+      // {
+      //   name: 'streams',
+      //   content: (
+      //     <Streams
+      //       scaffoldAppProviders={scaffoldAppProviders}
+      //       metaMultiSigWallet={metaMultiSigWallet}
+      //       address={accountAddress}
+      //       withdrawStreamEvents={withdrawStreamEvents}
+      //       price={ethPrice}
+      //       tx={tx}
+      //     />
+      //   ),
+      // },
+      {
+        name: 'create',
+        content: (
+          <CreateTransaction
+            scaffoldAppProviders={scaffoldAppProviders}
+            metaMultiSigWallet={metaMultiSigWallet}
+            accountAddress={accountAddress}
+            signaturesRequired={signaturesRequired}
+            ownerEvents={ownerEvents}
+            price={ethPrice}
+            poolServerUrl={poolServerUrl}
+          />
         ),
       },
       {
-        name: 'Dai',
+        name: 'pool',
+        content: (
+          <TransactionTest
+            scaffoldAppProviders={scaffoldAppProviders}
+            metaMultiSigWallet={metaMultiSigWallet}
+            address={accountAddress}
+            signaturesRequired={signaturesRequired}
+            tx={tx}
+            price={ethPrice}
+            poolServerUrl={poolServerUrl}
+            nonce={nonce}
+          />
+        ),
+      },
+      {
+        name: 'debug',
         content: (
           <GenericContract
-            contractName="Dai"
-            contract={mainnetDai}
+            contractName="MetaMultiSigWallet"
+            contract={metaMultiSigWallet}
             mainnetAdaptor={scaffoldAppProviders.mainnetAdaptor}
             blockExplorer={scaffoldAppProviders.targetNetwork.blockExplorer}
           />
